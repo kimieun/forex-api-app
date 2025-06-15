@@ -18,7 +18,7 @@ API_KEY = "99BO6UEVOS1ZHTSHK79J"
 @st.cache_data
 def fetch_api_exchange():
     start = "20240101"
-    end = datetime.today().strftime("%Y%m%d")
+    end = "20250613"
     url = f"http://ecos.bok.or.kr/api/StatisticSearch/{API_KEY}/json/kr/1/1000/036Y001/DD/{start}/{end}/0002"
     try:
         res = requests.get(url)
