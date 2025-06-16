@@ -14,21 +14,18 @@ end_dt = datetime.strptime(API_END_DATE, "%Y%m%d")
 # 기본 시작일: 오늘과 종료일 중 더 이른 날짜 사용
 default_start = min(datetime.today(), end_dt)
 
-# 사용자 입력 - 시작일 제한
+# 사용자 입력 - 시작일은 종료일 이전까지만 선택 가능
 start_date = st.date_input(
     "예측 시작 날짜",
-    default_start,
-    max_value=end_dt
+    default_start.date(),          # date 타입으로 전달
+    max_value=end_dt.date()        # date 타입 비교
 )
 
-# 예측 일수 입력
 days = st.slider("예측 일 수", min_value=1, max_value=30, value=7)
-
-# 예측 모드 선택
 mode = st.radio("예측 방식", ["Prophet 기반 예측", "시연용(한국은행 API 데이터)"])
 
-# 종료일 이후 날짜 선택 시 차단 (이론상 발생하지 않지만 안전망)
-if start_date > end_dt:
+# 종료일 이후 날짜 선택 시 중단
+if start_date > end_dt.date():
     st.error(f"예측 시작일은 종료일({API_END_DATE[:4]}-{API_END_DATE[4:6]}-{API_END_DATE[6:]})보다 이전이어야 합니다.")
     st.stop()
 
