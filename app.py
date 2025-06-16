@@ -5,94 +5,79 @@ from datetime import datetime
 import requests
 
 st.set_page_config(page_title="환율 예측 AI", layout="wide")
-st.title("💱 환율 예측 AI 시스템")
+st.title("💱 환율 예측 AI (ECOS API 연동)")
 
-# 종료일 고정 (한국은행 API 마지막 날짜)
-API_END_DATE = "20250613"
-end_dt = datetime.strptime(API_END_DATE, "%Y%m%d")
-
-# 시작일 기본값: 오늘과 종료일 중 더 이른 날짜
-default_start = min(datetime.today(), end_dt).date()
-
-# 사용자 입력 - 예측 시작일 (종료일보다 이후로 못 넘김)
-start_date = st.date_input(
-    "예측 시작 날짜",
-    default_start,
-    max_value=end_dt.date()
-)
-
-# 예측 일수 슬라이더
-days = st.slider("예측 일 수", min_value=1, max_value=30, value=7)
-
-# 예측 방식 선택
-mode = st.radio("예측 방식", ["Prophet 기반 예측", "시연용(한국은행 API 데이터)"])
-
-# 시작일 유효성 검사 (이론상 막혀 있지만 추가 안전망)
-if start_date > end_dt.date():
-    st.error(f"예측 시작일은 종료일({API_END_DATE[:4]}-{API_END_DATE[4:6]}-{API_END_DATE[6:]})보다 이전이어야 합니다.")
-    st.stop()
-
+# --- 설정 파트 ---
 API_KEY = "99BO6UEVOS1ZHTSHK79J"
+LANG = "kr"
+START_IDX = 1
+END_IDX = 1000
+TABLE = "731Y001"        # 외환시장 매매기준율
+FREQ = "DD"
+ITEM = "0000001"         # USD 항목 코드
+
+# 조회 가능 날짜 예시
+DEFAULT_START = "20240101"
+DEFAULT_END = "20240105"
+
+# 사용자 시작일/종료일 입력
+col1, col2 = st.columns(2)
+with col1:
+    start_date = st.date_input("시작일", datetime.strptime(DEFAULT_START, "%Y%m%d").date())
+with col2:
+    end_date = st.date_input("종료일", datetime.strptime(DEFAULT_END, "%Y%m%d").date())
+
+# 유효 범위 검사
+if start_date > end_date:
+    st.error("시작일이 종료일보다 앞서야 합니다.") 
+    st.stop()
+if (end_date - start_date).days > 365:
+    st.warning("1년 이하 기간만 권장됩니다.")
 
 @st.cache_data
-def fetch_api_exchange(user_start_date):
-    start = user_start_date.strftime("%Y%m%d")
-    end = API_END_DATE
-    url = f"http://ecos.bok.or.kr/api/StatisticSearch/{API_KEY}/json/kr/1/1000/036Y001/DD/{start}/{end}/0002"
-
-    st.write("📡 요청 URL:", url)
-
+def fetch_exchange(sdt, edt):
+    s = sdt.strftime("%Y%m%d")
+    e = edt.strftime("%Y%m%d")
+    url = (f"http://ecos.bok.or.kr/api/StatisticSearch/"
+           f"{API_KEY}/json/{LANG}/{START_IDX}/{END_IDX}/"
+           f"{TABLE}/{FREQ}/{s}/{e}/{ITEM}")
+    st.write("🔗 요청 URL:", url)
+    resp = requests.get(url)
     try:
-        res = requests.get(url)
+        data = resp.json()
+    except ValueError:
+        return None, "JSON 파싱 오류", resp.text
 
-        try:
-            data = res.json()
-            st.write("📥 API 응답 (JSON):", data)
-        except ValueError:
-            st.write("📥 API 응답 (텍스트):", res.text)
-            st.error("❌ JSON 형식 아님. API 응답 파싱 실패.")
-            return None
+    if "StatisticSearch" not in data:
+        # 에러 메시지 포함 응답
+        errmsg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
+        return None, data.get("RESULT", {}).get("CODE", "ERROR"), errmsg
 
-        if 'StatisticSearch' not in data:
-            msg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
-            code = data.get("RESULT", {}).get("CODE", "N/A")
-            st.error(f"❌ API 오류 (코드: {code}) → {msg}")
-            return None
+    rows = data["StatisticSearch"].get("row")
+    if not rows:
+        return None, "EMPTY", "조회 결과 없음"
 
-        rows = data['StatisticSearch']['row']
-        df = pd.DataFrame(rows)
-        df = df[['TIME', 'DATA_VALUE']]
-        df.columns = ['ds', 'y']
-        df['ds'] = pd.to_datetime(df['ds'])
-        df['y'] = df['y'].astype(float)
-        return df
+    df = pd.DataFrame(rows)
+    df = df.rename(columns={"TIME":"ds", "DATA_VALUE":"y"})
+    df["ds"] = pd.to_datetime(df["ds"], format="%Y%m%d")
+    df["y"] = df["y"].astype(float)
+    return df, "OK", None
 
-    except Exception as e:
-        st.error(f"API 요청 실패: {e}")
-        return None
+# --- API 호출 ---
+df, code, errmsg = fetch_exchange(start_date, end_date)
 
-# 데이터 불러오기
-if mode == "Prophet 기반 예측":
-    try:
-        df = pd.read_csv("data/exchange_rate.csv")
-        df.columns = ['ds', 'y']
-    except Exception as e:
-        st.error(f"CSV 로딩 실패: {e}")
-        st.stop()
-else:
-    df = fetch_api_exchange(start_date)
-    if df is None:
-        st.stop()
+if code != "OK":
+    st.error(f"API 오류 ({code}): {errmsg}")
+    st.stop()
 
-# 예측 및 시각화
-try:
-    model = Prophet()
-    model.fit(df)
-    future = model.make_future_dataframe(periods=days)
-    forecast = model.predict(future)
-    result = forecast[['ds', 'yhat']].tail(days)
-    result.columns = ['날짜', '예측 환율 (KRW/USD)']
-    st.line_chart(result.set_index("날짜"))
-    st.dataframe(result)
-except Exception as e:
-    st.error(f"예측 실패: {e}")
+# --- Prophet 예측 ---
+days = st.slider("예측일 수", 1, 30, 7)
+
+model = Prophet()
+model.fit(df)
+future = model.make_future_dataframe(periods=days)
+forecast = model.predict(future)
+res = forecast[['ds', 'yhat']].tail(days).rename(columns={'ds':'날짜','yhat':'환율(예측)'})
+
+st.line_chart(res.set_index("날짜"))
+st.dataframe(res)
