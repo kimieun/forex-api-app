@@ -26,11 +26,20 @@ try:
     model.fit(df)
     future = model.make_future_dataframe(periods=days)
     forecast = model.predict(future)
-    forecast = forecast[forecast["ds"] >= datetime.today() + pd.Timedelta(days=1)]  # 오늘 이후만 필터링
+
+    # 오늘 이후 데이터만 필터링 (단, 예측 결과가 없으면 전체 보여줌)
+    tomorrow = datetime.today() + pd.Timedelta(days=1)
     result = forecast[["ds", "yhat"]].rename(columns={"ds": "날짜", "yhat": "예측 환율 (KRW/USD)"})
+    future_result = result[result["날짜"] >= tomorrow]
 
     st.subheader(f"📊 {mode} 결과")
-    st.line_chart(result.set_index("날짜"))
-    st.dataframe(result)
+    if future_result.empty:
+        st.warning("예측 가능한 미래 데이터가 없습니다. 전체 예측 결과를 표시합니다.")
+        st.line_chart(result.set_index("날짜"))
+        st.dataframe(result)
+    else:
+        st.line_chart(future_result.set_index("날짜"))
+        st.dataframe(future_result)
+
 except Exception as e:
     st.error(f"예측 실패: {e}")
