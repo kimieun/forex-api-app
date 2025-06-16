@@ -1,8 +1,7 @@
-
 import streamlit as st
 import pandas as pd
 from prophet import Prophet
-from datetime import datetime, timedelta
+from datetime import datetime
 import requests
 
 st.set_page_config(page_title="환율 예측 AI", layout="wide")
@@ -20,9 +19,26 @@ def fetch_api_exchange():
     start = "20240101"
     end = "20250613"
     url = f"http://ecos.bok.or.kr/api/StatisticSearch/{API_KEY}/json/kr/1/1000/036Y001/DD/{start}/{end}/0002"
+
     try:
         res = requests.get(url)
-        data = res.json()
+
+        # 응답 디버깅 출력
+        try:
+            data = res.json()
+            st.write("📥 API 응답 (JSON):", data)
+        except ValueError:
+            st.write("📥 API 응답 (텍스트):", res.text)
+            st.error("❌ JSON 형식 아님. API 응답 파싱 실패.")
+            return None
+
+        # 정상 키 존재 확인
+        if 'StatisticSearch' not in data:
+            msg = data.get("RESULT", {}).get("MESSAGE", "알 수 없는 오류")
+            code = data.get("RESULT", {}).get("CODE", "N/A")
+            st.error(f"❌ API 오류 (코드: {code}) → {msg}")
+            return None
+
         rows = data['StatisticSearch']['row']
         df = pd.DataFrame(rows)
         df = df[['TIME', 'DATA_VALUE']]
@@ -30,8 +46,9 @@ def fetch_api_exchange():
         df['ds'] = pd.to_datetime(df['ds'])
         df['y'] = df['y'].astype(float)
         return df
+
     except Exception as e:
-        st.error(f"API 데이터 불러오기 실패: {e}")
+        st.error(f"API 요청 실패: {e}")
         return None
 
 if mode == "Prophet 기반 예측":
