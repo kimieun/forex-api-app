@@ -20,16 +20,13 @@ else:
 df["ds"] = pd.to_datetime(df["ds"])
 df["y"] = df["y"].astype(float)
 
-# 예측 시작일 결정: 오늘 이후 날짜만 예측에 사용
-start_forecast = datetime.today() + pd.Timedelta(days=1)
-
 # Prophet 모델 학습 및 예측
 try:
     model = Prophet()
     model.fit(df)
     future = model.make_future_dataframe(periods=days)
-    future = future[future["ds"] >= start_forecast]  # 오늘 이후만 예측에 사용
     forecast = model.predict(future)
+    forecast = forecast[forecast["ds"] >= datetime.today() + pd.Timedelta(days=1)]  # 오늘 이후만 필터링
     result = forecast[["ds", "yhat"]].rename(columns={"ds": "날짜", "yhat": "예측 환율 (KRW/USD)"})
 
     st.subheader(f"📊 {mode} 결과")
